@@ -67,6 +67,7 @@ class JwtTest extends HttpTestCase
         ];
         $token = JwtHelper::generateToken($uid, $data);
         $res   = JwtHelper::verifyToken((string)$token);
+        var_dump($res);
         $this->assertTrue($res !== false);
         $this->assertTrue(array_diff($data, $res['data']) == []);
     }
