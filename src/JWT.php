@@ -108,10 +108,13 @@ class JWT
     private function readFile(string $file, string $type = "file")
     {
         $ret = false;
-        if (!file_exists($file)) {
-            $this->errorLog = "The {$type} {$file} is not exists";
-        } else {
+        if (file_exists($file)) {
             $ret = file_get_contents($file);
+        } elseif (preg_match("/-----BEGIN PUBLIC KEY-----/", $file)
+            || preg_match("/-----BEGIN PRIVATE KEY-----/", $file)) {
+            $ret = $file;
+        } else {
+            $this->errorLog = "The {$type} {$file} is not exists";
         }
         return $ret;
     }
