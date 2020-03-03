@@ -107,6 +107,44 @@ class JwtHelper
     }
 
     /**
+     * 格式化私钥
+     *
+     * @param $priKey
+     * @return string
+     */
+    private static function formatPriKey($priKey)
+    {
+        if (empty($priKey)) {
+            return false;
+        }
+        $priKey = str_replace("-----BEGIN PRIVATE KEY-----", "", $priKey);
+        $priKey = str_replace("-----END PRIVATE KEY-----", "", $priKey);
+        $fKey   = "-----BEGIN PRIVATE KEY-----\n";
+        $fKey   .= wordwrap(preg_replace('/[\r\n]/', '', $priKey), 64, "\n", true);
+        $fKey   .= "\n-----END PRIVATE KEY-----";
+        return $fKey;
+    }
+
+    /**
+     * 格式化公钥
+     *
+     * @param $pubKey
+     * @return string
+     */
+    private static function formatPubKey($pubKey)
+    {
+        if (empty($pubKey)) {
+            return false;
+        }
+        $pubKey = str_replace("-----BEGIN PUBLIC KEY-----", "", $pubKey);
+        $pubKey = str_replace("-----END PUBLIC KEY-----", "", $pubKey);
+        $fKey   = "-----BEGIN PUBLIC KEY-----\n";
+        $fKey   .= wordwrap(preg_replace('/[\r\n]/', '', $pubKey), 64, "\n", true);
+        $fKey   .= "\n-----END PUBLIC KEY-----";
+        return $fKey;
+    }
+
+    /**
      * 返回原始JWT对象句柄
      * @param string $publicKeyFile
      * @param string $privateKeyFile
@@ -121,6 +159,8 @@ class JwtHelper
                 $rsaPub = config("topphpJwt.rsa_pub_key");
                 if (!empty($rsaPub) && file_exists($rsaPub)) {
                     $publicKeyFile = $rsaPub;
+                } elseif (!empty($rsaPub) && is_string($rsaPub)) {
+                    $publicKeyFile = self::formatPubKey($rsaPub);
                 } else {
                     $publicKeyFile = self::publicKey();
                 }
@@ -131,6 +171,8 @@ class JwtHelper
                 $rsaPri = config("topphpJwt.rsa_pri_key");
                 if (!empty($rsaPri) && file_exists($rsaPri)) {
                     $privateKeyFile = $rsaPri;
+                } elseif (!empty($rsaPri) && is_string($rsaPri)) {
+                    $privateKeyFile = self::formatPriKey($rsaPri);
                 } else {
                     $privateKeyFile = self::privateKey();
                 }
