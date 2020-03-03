@@ -15,7 +15,6 @@
 
 namespace Topphp\TopphpJwt;
 
-
 class JwtHelper
 {
     /**
@@ -45,7 +44,9 @@ class JwtHelper
             if (function_exists("request")) {
                 $nowRequestUrl = request()->domain() . request()->url();
             } else {
-                $http_type     = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https')) ? 'https://' : 'http://';
+                $http_type     = ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on') ||
+                    (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] == 'https'))
+                    ? 'https://' : 'http://';
                 $nowRequestUrl = $http_type . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
             }
             if ($nowRequestUrl !== $toUrl) {
@@ -169,9 +170,11 @@ class JwtHelper
         string $toUrl = ""
     ) {
         if ((int)$expTime == -1) {
-            return self::handler()->setIss($fromUrl)->setAud($toUrl)->setJti($id)->setNeverExp()->setData($data)->createToken();
+            return self::handler()->setIss($fromUrl)
+                ->setAud($toUrl)->setJti($id)->setNeverExp()->setData($data)->createToken();
         }
-        return self::handler()->setIss($fromUrl)->setAud($toUrl)->setJti($id)->setExpTime((int)$expTime)->setData($data)->createToken();
+        return self::handler()->setIss($fromUrl)
+            ->setAud($toUrl)->setJti($id)->setExpTime((int)$expTime)->setData($data)->createToken();
     }
 
     /**
