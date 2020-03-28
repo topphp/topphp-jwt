@@ -625,6 +625,9 @@ class JWT
             }
             $signer = $this->signer;
             $parse  = $this->decode($token);
+            if ($parse === false) {
+                return false;
+            }
             // 验证token签名有效性
             if (!$parse->verify($signer, $signer_key)) {
                 $this->errorLog = "Invalid Signature";
