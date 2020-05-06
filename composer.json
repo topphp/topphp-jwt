@@ -38,7 +38,9 @@
     "extra": {
         "think": {
             "services": [],
-            "config": []
+            "config": {
+                "topphpJwt": "topphpJwt.php"
+            }
         }
     },
     "config": {
