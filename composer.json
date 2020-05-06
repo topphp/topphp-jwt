@@ -39,7 +39,7 @@
         "think": {
             "services": [],
             "config": {
-                "topphpJwt": "topphpJwt.php"
+                "topphpJwt": "config/topphpJwt.php"
             }
         }
     },
