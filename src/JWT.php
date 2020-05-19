@@ -227,12 +227,15 @@ class JWT
      *
      * @param string $public_key_file
      * @param string $private_key_file
+     * @param bool $single 是否单例
      * @return JWT
      * @author bai
      */
-    public static function getInstance(string $public_key_file = '', string $private_key_file = '')
+    public static function getInstance(string $public_key_file = '', string $private_key_file = '', $single = false)
     {
-        if (!(self::$instance instanceof self)) {
+        if (!(self::$instance instanceof self) && $single) {
+            self::$instance = new self($public_key_file, $private_key_file);
+        } elseif ($single === false) {
             self::$instance = new self($public_key_file, $private_key_file);
         }
         return self::$instance;
