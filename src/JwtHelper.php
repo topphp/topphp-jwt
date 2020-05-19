@@ -148,11 +148,11 @@ class JwtHelper
      * 返回原始JWT对象句柄
      * @param string $publicKeyFile
      * @param string $privateKeyFile
+     * @param bool $single
      * @return JWT
-     * @throws \Exception
      * @author bai
      */
-    public static function handler(string $publicKeyFile = '', string $privateKeyFile = '')
+    public static function handler(string $publicKeyFile = '', string $privateKeyFile = '', $single = false)
     {
         if (empty($publicKeyFile) && function_exists("config")) {
             if (config("topphpJwt.use_rsa") === true) {
@@ -178,7 +178,10 @@ class JwtHelper
                 }
             }
         }
-        self::$handler = JWT::getInstance($publicKeyFile, $privateKeyFile);
+        if (!empty(self::$handler) && !$single) {
+            return self::$handler;
+        }
+        self::$handler = JWT::getInstance($publicKeyFile, $privateKeyFile, $single);
         return self::$handler;
     }
 
@@ -261,8 +264,9 @@ class JwtHelper
                     return false;
                 }
                 $data['id']          = $allData['jti'];
-                $data['create_time'] = date("Y-m-d H:i:s", $allData['iat']);
-                $data['expire_time'] = date("Y-m-d H:i:s", $allData['exp']);
+                $data['create_time'] = empty($allData['iat']) ? date("Y-m-d H:i:s", time())
+                    : date("Y-m-d H:i:s", $allData['iat']);
+                $data['expire_time'] = empty($allData['exp']) ? "" : date("Y-m-d H:i:s", $allData['exp']);
                 $data['data']        = $allData['data'];
             }
             return $data;
