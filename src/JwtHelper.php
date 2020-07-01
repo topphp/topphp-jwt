@@ -216,10 +216,10 @@ class JwtHelper
     ) {
         self::$handler = null;
         if ((int)$expTime == -1) {
-            return self::handler()->setIss($fromUrl)
+            return self::handler()->setIss($fromUrl)->setCreTime()
                 ->setAud($toUrl)->setJti($id)->setNeverExp()->setData($data)->createToken();
         }
-        return self::handler()->setIss($fromUrl)
+        return self::handler()->setIss($fromUrl)->setCreTime()
             ->setAud($toUrl)->setJti($id)->setExpTime((int)$expTime)->setData($data)->createToken();
     }
 
@@ -236,7 +236,7 @@ class JwtHelper
     public static function generateRefreshToken(int $id, array $data = [], string $fromUrl = "", string $toUrl = "")
     {
         self::$handler = null;
-        self::handler()->setIss($fromUrl)->setAud($toUrl)->setJti($id)->setData($data)->createToken(true);
+        self::handler()->setIss($fromUrl)->setCreTime()->setAud($toUrl)->setJti($id)->setData($data)->createToken(true);
         return self::handler()->getAllToken();
     }
 
