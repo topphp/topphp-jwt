@@ -129,7 +129,8 @@ class JwtTest extends HttpTestCase
         // 支持更新data数据
         $token = JwtHelper::refreshToken($tokenArr['refreshToken'], $data2);
         $res   = JwtHelper::verifyToken((string)$token);
-        $this->assertTrue(array_diff($data1, $res['data']) != []);
+        $data3 = (array)$res['data'];
+        $this->assertTrue(array_diff($data1, $data3) != []);
     }
 
     /**
