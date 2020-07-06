@@ -35,23 +35,23 @@ vendor/
 ## 用法
 
 ```php
-    命名空间引用（建议直接使用助手类）：
+    #命名空间引用（建议直接使用助手类）：
+        use Topphp\TopphpJwt\JWT2;
         use Topphp\TopphpJwt\JwtHelper;
-        
-    调用方式有两种：
-        1、通过原始JWT单例调用
-            JWT::getInstance()->setJti(10001)->setData(["test"=>"中文"])->createToken();
-        2、通过助手类直接调用
+    #调用方式有两种：
+        #1、通过原始JWT单例调用
+            JWT2::getInstance()->setJti(10001)->setData(["test"=>"中文"])->createToken();
+        #2、通过助手类直接调用
             JwtHelper::handler()->setJti(10001)->setData(["test"=>"中文"])->createToken();
-        3、助手类直接提供优化过的完善的快捷方法【推荐】
+        #3、助手类直接提供优化过的完善的快捷方法【推荐】
             JwtHelper::generateToken(10001, ["test"=>"中文"], time() + 7200);
             
-    注意事项：
-        1、默认建议使用HMAC方式进行签名加密，如果对于数据加密需求比较高，提供RSA方式签名加密，只需要修改配置use_rsa为true
-        2、使用RSA签名，配置文件topphpJwt中公私钥地址如果为空，默认获取根目录下 pem 中的公钥地址，可结合topphp-rsa组件创建公私钥
-        3、默认的助手类已经提供了大部分常用场景所需的方法，更多用法可以参看单元测试文件和对应的官方文档
+    #注意事项：
+       # 1、默认建议使用HMAC方式进行签名加密，如果对于数据加密需求比较高，提供RSA方式签名加密，只需要修改配置use_rsa为true
+       # 2、使用RSA签名，配置文件topphpJwt中公私钥地址如果为空，默认获取根目录下 pem 中的公钥地址，可结合topphp-rsa组件创建公私钥
+       # 3、默认的助手类已经提供了大部分常用场景所需的方法，更多用法可以参看单元测试文件和对应的官方文档
         
-    使用示例一：
+    #使用示例一：
         // 当前签发的JWT的唯一标识（例如：用户uid）
         $id  = 1;
         // 当前签发的JWT附带的额外数据（例如：用户信息）
@@ -63,20 +63,24 @@ vendor/
         $expTime = time() + 7200;
         
         // 生成token
-        @param int $id jwt唯一标识（如用户UID）
-        @param array $data 【可选】附加数据（如用户信息）
-        @param string $expTime 【可选】设置过期时间（时间戳）不传默认 1 小时，传 -1 为永不过期
-        @param string $fromUrl 【可选】签发者URL
-        @param string $toUrl 【可选】接收者URL
+      /** @param int $id jwt唯一标识（如用户UID）
+        * @param array $data 【可选】附加数据（如用户信息）
+        * @param string $expTime 【可选】设置过期时间（时间戳）不传默认 1 小时，传 -1 为永不过期
+        * @param string $fromUrl 【可选】签发者URL
+        * @param string $toUrl 【可选】接收者URL
+        */
         $token   = JwtHelper::generateToken($id, $data, $expTime);
         // token = eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImp0aSI6IjEifQ.eyJpc3MiOiJodHRwOlwvXC9kb21haW4xLmNvbSIsImp0aSI6IjEiLCJpYXQiOjE1ODMyNDAzMTMsIm5iZiI6MTU4MzI0MDMxMywiZXhwIjoxNTgzMjQ3NTEzLCJkYXRhIjoie1widWlkXCI6MSxcInVzZXJuYW1lXCI6XCJcdTVmMjBcdTRlMDlcIn0ifQ.TO-4staZCPwUi7qJp9Z7iDoj7LDmVME8Z-AHrPAag2M
         
         // 验证token
-        @param string $token
-        @param bool $isAll 【可选】是否验证成功返回全部数据
-        @param string $allowUrl 【可选】准许的签发者url
+      /**
+        * @param string $token
+        * @param bool $isAll 【可选】是否验证成功返回全部数据
+        * @param string $allowUrl 【可选】准许的签发者url
+        */
         $res = JwtHelper::verifyToken((string)$token);
         // 验证通过会返回如下数据，不通过返回false
+        /**
         array(4) {
           ["id"]=>
           string(1) "1"
@@ -92,7 +96,8 @@ vendor/
             string(6) "张三"
           }
         }
-    使用示例二：
+        */
+    // 使用示例二：
         $uid  = 1;
         $data = [
             "uid"      => 1,
@@ -136,17 +141,17 @@ vendor/
 
 The MIT License (MIT). Please see [License File](LICENSE.md) for more information.
 
-[ico-version]: https://img.shields.io/packagist/v/topphp/component-builder.svg?style=flat-square
+[ico-version]: https://img.shields.io/packagist/v/topphp/topphp-jwt.svg?style=flat-square
 [ico-license]: https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square
-[ico-travis]: https://img.shields.io/travis/topphp/component-builder/master.svg?style=flat-square
-[ico-scrutinizer]: https://img.shields.io/scrutinizer/coverage/g/topphp/component-builder.svg?style=flat-square
-[ico-code-quality]: https://img.shields.io/scrutinizer/g/topphp/component-builder.svg?style=flat-square
-[ico-downloads]: https://img.shields.io/packagist/dt/topphp/component-builder.svg?style=flat-square
+[ico-travis]: https://img.shields.io/travis/topphp/topphp-jwt/master.svg?style=flat-square
+[ico-scrutinizer]: https://img.shields.io/scrutinizer/coverage/g/topphp/topphp-jwt.svg?style=flat-square
+[ico-code-quality]: https://img.shields.io/scrutinizer/g/topphp/topphp-jwt.svg?style=flat-square
+[ico-downloads]: https://img.shields.io/packagist/dt/topphp/topphp-jwt.svg?style=flat-square
 
-[link-packagist]: https://packagist.org/packages/topphp/component-builder
-[link-travis]: https://travis-ci.org/topphp/component-builder
-[link-scrutinizer]: https://scrutinizer-ci.com/g/topphp/component-builder/code-structure
-[link-code-quality]: https://scrutinizer-ci.com/g/topphp/component-builder
-[link-downloads]: https://packagist.org/packages/topphp/component-builder
+[link-packagist]: https://packagist.org/packages/topphp/topphp-jwt
+[link-travis]: https://travis-ci.org/topphp/topphp-jwt
+[link-scrutinizer]: https://scrutinizer-ci.com/g/topphp/topphp-jwt/code-structure
+[link-code-quality]: https://scrutinizer-ci.com/g/topphp/topphp-jwt
+[link-downloads]: https://packagist.org/packages/topphp/topphp-jwt
 [link-author]: https://github.com/topphp
-[link-contributors]: ../../contributors
+[link-contributors]: https://github.com/topphp/topphp-jwt/contributors

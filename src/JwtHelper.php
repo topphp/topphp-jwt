@@ -18,7 +18,7 @@ namespace Topphp\TopphpJwt;
 class JwtHelper
 {
     /**
-     * @var JWT
+     * @var JWT2
      */
     private static $handler;
 
@@ -149,7 +149,7 @@ class JwtHelper
      * @param string $publicKeyFile
      * @param string $privateKeyFile
      * @param bool $single
-     * @return JWT
+     * @return JWT2
      * @author bai
      */
     public static function handler(string $publicKeyFile = '', string $privateKeyFile = '', $single = false)
@@ -181,7 +181,7 @@ class JwtHelper
         if (!empty(self::$handler) && !$single) {
             return self::$handler;
         }
-        self::$handler = JWT::getInstance($publicKeyFile, $privateKeyFile, $single);
+        self::$handler = JWT2::getInstance($publicKeyFile, $privateKeyFile, $single);
         return self::$handler;
     }
 

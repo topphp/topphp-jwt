@@ -1,698 +1,523 @@
 <?php
 /**
  * 凯拓软件 [临渊羡鱼不如退而结网,凯拓与你一同成长]
- * Project: topphp-client
- * Date: 2020/2/29 10:36
- * Author: bai <sleep@kaituocn.com>
+ * @package topphp-jwt
+ * @date 2020/7/6 09:37
+ * @author sleep <sleep@kaituocn.com>
  */
 declare(strict_types=1);
 
 namespace Topphp\TopphpJwt;
 
-use Lcobucci\JWT\Builder;
-use Lcobucci\JWT\Parser;
-use Lcobucci\JWT\Signer\Hmac\Sha256;
-use Lcobucci\JWT\Signer\Rsa\Sha256 as RsaSha256;
-use Lcobucci\JWT\ValidationData;
+use ArrayAccess;
+use \DomainException;
+use \InvalidArgumentException;
+use Topphp\TopphpJwt\exception\BeforeValidException;
+use Topphp\TopphpJwt\exception\ExpiredException;
+use Topphp\TopphpJwt\exception\SignatureInvalidException;
+use \UnexpectedValueException;
+use \DateTime;
 
+/**
+ * JSON Web Token implementation, based on this spec:
+ * https://tools.ietf.org/html/rfc7519
+ *
+ * PHP version 5
+ *
+ * @category Authentication
+ * @package  Authentication_JWT
+ * @author   Neuman Vong <neuman@twilio.com>
+ * @author   Anant Narayanan <anant@php.net>
+ * @license  http://opensource.org/licenses/BSD-3-Clause 3-clause BSD
+ * @link     https://github.com/firebase/php-jwt
+ */
 class JWT
 {
-    // 初始化属性【无需修改】
-    private static $instance; // 该类实例
-    private $rsaPrivateKey = null;
-    private $rsaPublicKey = null;
-    private $signer = null;
-    private $errorLog = "";
-    private $token; // 加密后的token
-    private $decodeToken; // 解析JWT得到的token对象
-    private $decodeRefreshToken; // 解析JWT得到的refreshToken对象
-    private $isRefreshToken = false;
-    private $refresh = "";// 刷新Token标识符
-
-    // jwt参数，全部参数建议但不强制使用【初始化参数无需修改】
-    private $iss = ''; // 该JWT的签发者url
-    private $sub = ''; // 该JWT所面向的用户，用于处理特定应用，类似该jwt的主题
-    private $aud = ''; // 接受者的url地址
-    private $exp = ''; // 该JWT的销毁时间；unix时间戳
-    private $nbf = ''; // 该JWT的使用时间不能早于该时间；unix时间戳
-    private $iat = ''; // 该JWT的签发时间；unix 时间戳
-    private $jti = ''; // 该JWT的唯一ID编号
-    private $rtk = ''; // 该JWT的refreshToken
-    private $data = '';// 自定义JWT参数【claim 声明一个新配置参数】
-
-    // jwt密钥【可自行定义修改,如果使用RSA形式签名，可忽略此参数，并务必设置公私钥】
-    private $secret = '6C5eEE0BcA1480081371B525Bf198AE2';
-    private $allowExpNever = false; // 是否允许设置永不过期JWT 默认不允许
-    private $defAddUseSec = 0; // 配置JWT使用时间默认增加量，单位s【签发后多久开始生效】
-    private $defAddExpSec = 3600; // 配置JWT过期时间默认增加量，单位s【签发后多久过期】
-    private $defRefTokenSec = 14 * 24 * 3600; // 配置JWT refreshToken 默认增加量，单位s【默认14天】
+    const ASN1_INTEGER = 0x02;
+    const ASN1_SEQUENCE = 0x10;
+    const ASN1_BIT_STRING = 0x03;
 
     /**
-     * 构造函数【单例模式】
-     * JWT constructor.
-     * @param string $public_key_file string RSA公钥文件路径【验证token】
-     * @param string $private_key_file string RSA私钥文件路径【生成token】
-     * @author bai
+     * When checking nbf, iat or expiration times,
+     * we want to provide some extra leeway time to
+     * account for clock skew.
      */
-    private function __construct(string $public_key_file, string $private_key_file)
+    public static $leeway = 0;
+
+    /**
+     * Allow the current timestamp to be specified.
+     * Useful for fixing a value within unit testing.
+     *
+     * Will default to PHP time() value if null.
+     */
+    public static $timestamp = null;
+
+    public static $supported_algs = [
+        'ES256' => ['openssl', 'SHA256'],
+        'HS256' => ['hash_hmac', 'SHA256'],
+        'HS384' => ['hash_hmac', 'SHA384'],
+        'HS512' => ['hash_hmac', 'SHA512'],
+        'RS256' => ['openssl', 'SHA256'],
+        'RS384' => ['openssl', 'SHA384'],
+        'RS512' => ['openssl', 'SHA512'],
+    ];
+
+    /**
+     * Decodes a JWT string into a PHP object.
+     *
+     * @param string                    $jwt            The JWT
+     * @param string|array|resource     $key            The key, or map of keys.
+     *                                                  If the algorithm used is asymmetric, this is the public key
+     * @param array                     $allowed_algs   List of supported verification algorithms
+     * Supported algorithms are 'ES256', 'HS256', 'HS384', 'HS512', 'RS256', 'RS384', and 'RS512'
+     *
+     * @return object The JWT's payload as a PHP object
+     *
+     * @throws UnexpectedValueException     Provided JWT was invalid
+     * @throws SignatureInvalidException    Provided JWT was invalid because the signature verification failed
+     * @throws BeforeValidException         Provided JWT is trying to be used before it's eligible as defined by 'nbf'
+     * @throws BeforeValidException         Provided JWT is trying to be used before it's been created as defined by 'iat'
+     * @throws ExpiredException             Provided JWT has since expired, as defined by the 'exp' claim
+     *
+     * @uses jsonDecode
+     * @uses urlsafeB64Decode
+     */
+    public static function decode($jwt, $key, array $allowed_algs = [])
     {
-        if ($public_key_file) {
-            $this->getPublicKey($public_key_file);
+        $timestamp = is_null(static::$timestamp) ? time() : static::$timestamp;
+
+        if (empty($key)) {
+            throw new InvalidArgumentException('Key may not be empty');
         }
-        if ($private_key_file) {
-            $this->getPrivateKey($private_key_file);
+        $tks = explode('.', $jwt);
+        if (count($tks) != 3) {
+            throw new UnexpectedValueException('Wrong number of segments');
         }
-        if (empty($public_key_file) || empty($private_key_file)) {
-            $this->signer = new Sha256();
+        list($headb64, $bodyb64, $cryptob64) = $tks;
+        if (null === ($header = static::jsonDecode(static::urlsafeB64Decode($headb64)))) {
+            throw new UnexpectedValueException('Invalid header encoding');
+        }
+        if (null === $payload = static::jsonDecode(static::urlsafeB64Decode($bodyb64))) {
+            throw new UnexpectedValueException('Invalid claims encoding');
+        }
+        if (false === ($sig = static::urlsafeB64Decode($cryptob64))) {
+            throw new UnexpectedValueException('Invalid signature encoding');
+        }
+        if (empty($header->alg)) {
+            throw new UnexpectedValueException('Empty algorithm');
+        }
+        if (empty(static::$supported_algs[$header->alg])) {
+            throw new UnexpectedValueException('Algorithm not supported');
+        }
+        if (!in_array($header->alg, $allowed_algs)) {
+            throw new UnexpectedValueException('Algorithm not allowed');
+        }
+        if ($header->alg === 'ES256') {
+            // OpenSSL expects an ASN.1 DER sequence for ES256 signatures
+            $sig = self::signatureToDER($sig);
+        }
+
+        if (is_array($key) || $key instanceof ArrayAccess) {
+            if (isset($header->kid)) {
+                if (!isset($key[$header->kid])) {
+                    throw new UnexpectedValueException('"kid" invalid, unable to lookup correct key');
+                }
+                $key = $key[$header->kid];
+            } else {
+                throw new UnexpectedValueException('"kid" empty, unable to lookup correct key');
+            }
+        }
+
+        // Check the signature
+        if (!static::verify("$headb64.$bodyb64", $sig, $key, $header->alg)) {
+            throw new SignatureInvalidException('Signature verification failed');
+        }
+
+        // Check the nbf if it is defined. This is the time that the
+        // token can actually be used. If it's not yet that time, abort.
+        if (isset($payload->nbf) && $payload->nbf > ($timestamp + static::$leeway)) {
+            throw new BeforeValidException(
+                'Cannot handle token prior to ' . date(DateTime::ISO8601, $payload->nbf)
+            );
+        }
+
+        // Check that this token has been created before 'now'. This prevents
+        // using tokens that have been created for later use (and haven't
+        // correctly used the nbf claim).
+        if (isset($payload->iat) && $payload->iat > ($timestamp + static::$leeway)) {
+            throw new BeforeValidException(
+                'Cannot handle token prior to ' . date(DateTime::ISO8601, $payload->iat)
+            );
+        }
+
+        // Check if this token has expired.
+        if (isset($payload->exp) && ($timestamp - static::$leeway) >= $payload->exp) {
+            throw new ExpiredException('Expired token');
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Converts and signs a PHP object or array into a JWT string.
+     *
+     * @param object|array  $payload    PHP object or array
+     * @param string        $key        The secret key.
+     *                                  If the algorithm used is asymmetric, this is the private key
+     * @param string        $alg        The signing algorithm.
+     * Supported algorithms are 'ES256', 'HS256', 'HS384', 'HS512', 'RS256', 'RS384', and 'RS512'
+     * @param mixed         $keyId
+     * @param array         $head       An array with header elements to attach
+     *
+     * @return string A signed JWT
+     *
+     * @uses jsonEncode
+     * @uses urlsafeB64Encode
+     */
+    public static function encode($payload, $key, $alg = 'HS256', $keyId = null, $head = null)
+    {
+        $header = ['typ' => 'JWT', 'alg' => $alg];
+        if ($keyId !== null) {
+            $header['kid'] = $keyId;
+        }
+        if (isset($head) && is_array($head)) {
+            $header = array_merge($head, $header);
+        }
+        $segments = [];
+        $segments[] = static::urlsafeB64Encode(static::jsonEncode($header));
+        $segments[] = static::urlsafeB64Encode(static::jsonEncode($payload));
+        $signing_input = implode('.', $segments);
+
+        $signature = static::sign($signing_input, $key, $alg);
+        $segments[] = static::urlsafeB64Encode($signature);
+
+        return implode('.', $segments);
+    }
+
+    /**
+     * Sign a string with a given key and algorithm.
+     *
+     * @param string            $msg    The message to sign
+     * @param string|resource   $key    The secret key
+     * @param string            $alg    The signing algorithm.
+     * Supported algorithms are 'ES256', 'HS256', 'HS384', 'HS512', 'RS256', 'RS384', and 'RS512'
+     *
+     * @return string An encrypted message
+     *
+     * @throws DomainException Unsupported algorithm was specified
+     */
+    public static function sign($msg, $key, $alg = 'HS256')
+    {
+        if (empty(static::$supported_algs[$alg])) {
+            throw new DomainException('Algorithm not supported');
+        }
+        list($function, $algorithm) = static::$supported_algs[$alg];
+        switch ($function) {
+            case 'hash_hmac':
+                return hash_hmac($algorithm, $msg, $key, true);
+            case 'openssl':
+                $signature = '';
+                $success = openssl_sign($msg, $signature, $key, $algorithm);
+                if (!$success) {
+                    throw new DomainException("OpenSSL unable to sign data");
+                } else {
+                    if ($alg === 'ES256') {
+                        $signature = self::signatureFromDER($signature, 256);
+                    }
+                    return $signature;
+                }
         }
     }
 
     /**
-     * 获取公钥文件内容
+     * Verify a signature with the message, key and method. Not all methods
+     * are symmetric, so we must have a separate verify and sign method.
      *
-     * @param $file
-     * @author bai
-     */
-    private function getPublicKey(string $file)
-    {
-        $key_content = $this->readFile($file, "publicKey file");
-        if ($key_content) {
-            $this->signer       = new RsaSha256();
-            $this->rsaPublicKey = $key_content;
-        }
-    }
-
-    /**
-     * 获取私钥文件内容
+     * @param string            $msg        The original message (header and body)
+     * @param string            $signature  The original signature
+     * @param string|resource   $key        For HS*, a string key works. for RS*, must be a resource of an openssl public key
+     * @param string            $alg        The algorithm
      *
-     * @param $file
-     * @author bai
-     */
-    private function getPrivateKey(string $file)
-    {
-        $key_content = $this->readFile($file, "privateKey file");
-        if ($key_content) {
-            $this->signer        = new RsaSha256();
-            $this->rsaPrivateKey = $key_content;
-        }
-    }
-
-    /**
-     * 读取文件内容
-     *
-     * @param $file
-     * @param string $type
-     * @return bool|false|string
-     * @author bai
-     */
-    private function readFile(string $file, string $type = "file")
-    {
-        $ret = false;
-        if (file_exists($file)) {
-            $ret = file_get_contents($file);
-        } elseif (preg_match("/-----BEGIN PUBLIC KEY-----/", $file)
-            || preg_match("/-----BEGIN PRIVATE KEY-----/", $file)) {
-            $ret = $file;
-        } else {
-            $this->errorLog = "The {$type} {$file} is not exists";
-        }
-        return $ret;
-    }
-
-    /**
-     * 创建refreshToken标识符，用于验证token是否是refreshToken类型
-     *
-     * @param $str
-     * @param string $salt
-     * @return string
-     * @author bai
-     */
-    private function refreshTokenSecret(string $str = "refreshToken", string $salt = "EqyPF6")
-    {
-        return md5(md5($str . $salt));
-    }
-
-    /**
-     * 生成令牌后的保存操作（例如存到redis中）
-     *
-     * @param string $token
-     * @param string $refreshToken
-     * @author bai
-     */
-    private function saveToken(string $token = "", string $refreshToken = "")
-    {
-        $this->token = $token;
-        $this->rtk   = $refreshToken;
-        // 保存Token的操作（可选）
-    }
-
-    /**
-     * 是否是json数据
-     *
-     * @param $str
      * @return bool
-     * @author bai
-     */
-    private function isJson($str)
-    {
-        return is_string($str) && !is_null(json_decode($str));
-    }
-
-    /**
-     * 解密Token
      *
-     * @param string $token
-     * @return bool|\Lcobucci\JWT\Token
-     * @author bai
+     * @throws DomainException Invalid Algorithm or OpenSSL failure
      */
-    private function decode(string $token = null)
+    private static function verify($msg, $signature, $key, $alg)
     {
-        try {
-            if (!empty($this->decodeToken) && !$this->isRefreshToken) {
-                return $this->decodeToken;
-            }
-            if (!empty($this->decodeRefreshToken) && $this->isRefreshToken) {
-                return $this->decodeRefreshToken;
-            }
-            if ($this->isRefreshToken) {
-                if (empty($token) && empty($this->rtk)) {
+        if (empty(static::$supported_algs[$alg])) {
+            throw new DomainException('Algorithm not supported');
+        }
+
+        list($function, $algorithm) = static::$supported_algs[$alg];
+        switch ($function) {
+            case 'openssl':
+                $success = openssl_verify($msg, $signature, $key, $algorithm);
+                if ($success === 1) {
+                    return true;
+                } elseif ($success === 0) {
                     return false;
-                } elseif (empty($token)) {
-                    $token = (string)$this->rtk;
                 }
-            } else {
-                if (empty($token) && empty($this->token)) {
-                    return false;
-                } elseif (empty($token)) {
-                    $token = (string)$this->token;
+                // returns 1 on success, 0 on failure, -1 on error.
+                throw new DomainException(
+                    'OpenSSL error: ' . openssl_error_string()
+                );
+            case 'hash_hmac':
+            default:
+                $hash = hash_hmac($algorithm, $msg, $key, true);
+                if (function_exists('hash_equals')) {
+                    return hash_equals($signature, $hash);
                 }
-            }
-            $parser = new Parser();
-            if (!$this->isRefreshToken) {
-                $decode = $this->decodeToken = $parser->parse($token);
-            } else {
-                $decode = $this->decodeRefreshToken = $parser->parse($token);
-            }
-            $this->iss     = isset($decode->getClaims()['iss']) ? $decode->getClaim('iss') : "";
-            $this->sub     = isset($decode->getClaims()['sub']) ? $decode->getClaim('sub') : "";
-            $this->aud     = isset($decode->getClaims()['aud']) ? $decode->getClaim('aud') : "";
-            $this->jti     = isset($decode->getClaims()['jti']) ? $decode->getClaim('jti') : "";
-            $this->iat     = isset($decode->getClaims()['iat']) ? $decode->getClaim('iat') : "";
-            $this->nbf     = isset($decode->getClaims()['nbf']) ? $decode->getClaim('nbf') : "";
-            $this->exp     = isset($decode->getClaims()['exp']) ? $decode->getClaim('exp') : "";
-            $this->data    = isset($decode->getClaims()['data']) ? $decode->getClaim('data') : "";
-            $this->refresh = isset($decode->getClaims()['refresh']) ? $decode->getClaim('refresh') : "";
-            return $decode;
-        } catch (\Exception $e) {
-            $this->errorLog = $e->getMessage();
-            return false;
-        }
-    }
+                $len = min(static::safeStrlen($signature), static::safeStrlen($hash));
 
-    /**
-     * 私有化克隆
-     *
-     * @author bai
-     */
-    private function __clone()
-    {
-    }
-
-
-    //************************************ --- JWT公共方法 --- ****************************************//
-
-
-    /**
-     * 该类的实例
-     *
-     * @param string $public_key_file
-     * @param string $private_key_file
-     * @param bool $single 是否单例
-     * @return JWT
-     * @author bai
-     */
-    public static function getInstance(string $public_key_file = '', string $private_key_file = '', $single = false)
-    {
-        if (!(self::$instance instanceof self) && $single) {
-            self::$instance = new self($public_key_file, $private_key_file);
-        } elseif ($single === false) {
-            self::$instance = new self($public_key_file, $private_key_file);
-        }
-        return self::$instance;
-    }
-
-    /**
-     * 获取错误信息
-     *
-     * @return string
-     * @author bai
-     */
-    public function getErrorMsg()
-    {
-        return $this->errorLog;
-    }
-
-    /**
-     * 设置jwtSecret
-     *
-     * @param string $secret
-     * @return $this
-     * @author bai
-     */
-    public function setJwtSecret(string $secret)
-    {
-        $this->secret = $secret;
-        return $this;
-    }
-
-    /**
-     * 设置ID【jti (例如：登录用户UID)】
-     *
-     * @param $id
-     * @return $this
-     * @author bai
-     */
-    public function setJti(string $id)
-    {
-        $this->jti = $id;
-        return $this;
-    }
-
-    /**
-     * 设置主题【sub (例如：登录用户名)】
-     *
-     * @param $title
-     * @return $this
-     * @author bai
-     */
-    public function setSub(string $title)
-    {
-        $this->sub = $title;
-        return $this;
-    }
-
-    /**
-     * 设置签发者URL iss
-     *
-     * @param $fromUrl
-     * @return $this
-     * @author bai
-     */
-    public function setIss(string $fromUrl)
-    {
-        $this->iss = $fromUrl;
-        return $this;
-    }
-
-    /**
-     * 设置接收者URL aud
-     *
-     * @param $toUrl
-     * @return $this
-     * @author bai
-     */
-    public function setAud(string $toUrl)
-    {
-        $this->aud = $toUrl;
-        return $this;
-    }
-
-    /**
-     * 设置类内部的加密 $token 值（用于解密）
-     *
-     * @param $token
-     * @return $this
-     * @author bai
-     */
-    public function setToken(string $token)
-    {
-        $this->token = $token;
-        return $this;
-    }
-
-    /**
-     * 设置获取的是refreshToken信息
-     *
-     * @return $this
-     * @author bai
-     */
-    public function setIsRefreshToken()
-    {
-        $this->isRefreshToken = true;
-        return $this;
-    }
-
-    /**
-     * 设置JWT的创建时间（一般为服务器当前时间戳）【iat 签发时间大于当前服务器时间，验证返回失败】
-     *
-     * @param $now_time
-     * @return $this
-     * @author bai
-     */
-    public function setCreTime($now_time = null)
-    {
-        if (empty($now_time)) {
-            $now_time = time();
-        }
-        $this->iat = $now_time;
-        return $this;
-    }
-
-    /**
-     * 设置JWT的允许使用时间【nbf 使用时间之前不接收处理该Token，验证返回失败】
-     *
-     * @param $allow_use_time
-     * @return $this
-     * @author bai
-     */
-    public function setUseTime($allow_use_time = null)
-    {
-        if (empty($allow_use_time)) {
-            if (empty($this->iat)) {
-                $this->iat = time();
-            }
-            $allow_use_time = $this->iat + $this->defAddUseSec;
-        }
-        $this->nbf = $allow_use_time;
-        return $this;
-    }
-
-    /**
-     * 设置永不过期
-     *
-     * @return $this
-     * @author bai
-     */
-    public function setNeverExp()
-    {
-        $this->allowExpNever = true;
-        return $this;
-    }
-
-    /**
-     * 设置JWT的过期时间【exp 过期时间小于当前服务器时间，验证返回失败】
-     *
-     * @param $expire_time
-     * @return $this
-     * @author bai
-     */
-    public function setExpTime($expire_time = null)
-    {
-        if (!$this->allowExpNever) {
-            if (empty($expire_time)) {
-                if (empty($this->iat)) {
-                    $this->iat = time();
+                $status = 0;
+                for ($i = 0; $i < $len; $i++) {
+                    $status |= (ord($signature[$i]) ^ ord($hash[$i]));
                 }
-                $expire_time = $this->iat + $this->defAddExpSec;
-            }
-            $this->exp = $expire_time;
+                $status |= (static::safeStrlen($signature) ^ static::safeStrlen($hash));
+
+                return ($status === 0);
         }
-        return $this;
     }
 
     /**
-     * 设置JWT的自定义参数【数组类型或已经加密过的字符串类型，一般用于存储数据，例如用户信息】
+     * Decode a JSON string into a PHP object.
      *
-     * @param array $data
-     * @return $this
-     * @author bai
+     * @param string $input JSON string
+     *
+     * @return object Object representation of JSON string
+     *
+     * @throws DomainException Provided string was invalid JSON
      */
-    public function setData($data = [])
+    public static function jsonDecode($input)
     {
-        if (is_array($data)) {
-            $this->data = json_encode($data, JSON_UNESCAPED_UNICODE);
+        if (version_compare(PHP_VERSION, '5.4.0', '>=') && !(defined('JSON_C_VERSION') && PHP_INT_SIZE > 4)) {
+            /** In PHP >=5.4.0, json_decode() accepts an options parameter, that allows you
+             * to specify that large ints (like Steam Transaction IDs) should be treated as
+             * strings, rather than the PHP default behaviour of converting them to floats.
+             */
+            $obj = json_decode($input, false, 512, JSON_BIGINT_AS_STRING);
         } else {
-            $this->data = (string)$data;
+            /** Not all servers will support that, however, so for older versions we must
+             * manually detect large ints in the JSON string and quote them (thus converting
+             *them to strings) before decoding, hence the preg_replace() call.
+             */
+            $max_int_length = strlen((string) PHP_INT_MAX) - 1;
+            $json_without_bigints = preg_replace('/:\s*(-?\d{'.$max_int_length.',})/', ': "$1"', $input);
+            $obj = json_decode($json_without_bigints);
         }
-        return $this;
+
+        if ($errno = json_last_error()) {
+            static::handleJsonError($errno);
+        } elseif ($obj === null && $input !== 'null') {
+            throw new DomainException('Null result with non-null input');
+        }
+        return $obj;
     }
 
     /**
-     * 创建Token
+     * Encode a PHP object into a JSON string.
      *
-     * @param bool $init 是否是初始化 是--返回refreshToken【一般仅用户登录时为true】 不是--不会返回refreshToken
-     * @return bool|\Lcobucci\JWT\Token
-     * @author bai
+     * @param object|array $input A PHP object or array
+     *
+     * @return string JSON representation of the PHP object or array
+     *
+     * @throws DomainException Provided object could not be encoded to valid JSON
      */
-    public function createToken(bool $init = false)
+    public static function jsonEncode($input)
     {
-        try {
-            // 验证入参必须
-            if (empty($this->secret) && empty($this->rsaPrivateKey)) {
-                $this->errorLog = "Please set the secret";
-                return false;
-            } elseif (!empty($this->rsaPrivateKey)) {
-                $signer_key = $this->rsaPrivateKey;
-            } else {
-                $signer_key = $this->secret;
-            }
-            if (empty($this->iat)) {
-                $this->iat = time();
-            }
-            if (empty($this->nbf)) {
-                $this->nbf = $this->iat + $this->defAddUseSec;
-            }
-            if (empty($this->exp)) {
-                $this->exp = $this->iat + $this->defAddExpSec;
-            }
-            // 构建实例
-            $signer       = $this->signer;
-            $builder      = new Builder();
-            $refreshToken = "";
-            // 配置
-            if (!empty($this->iss)) {
-                // This method will be removed on v4
-                $builder->setIssuer($this->iss);
-            }
-            if (!empty($this->sub)) {
-                // This method will be removed on v4
-                $builder->setSubject($this->sub);
-            }
-            if (!empty($this->aud)) {
-                // This method will be removed on v4
-                $builder->setAudience($this->aud);
-            }
-            if (!empty($this->jti)) {
-                // This method will be removed on v4
-                $builder->setId($this->jti, true);
-            }
-            // This method will be removed on v4
-            $builder->setIssuedAt($this->iat);
-            // This method will be removed on v4
-            $builder->setNotBefore($this->nbf);
-            // This method will be removed on v4
-            if (!$this->allowExpNever) {
-                $builder->setExpiration($this->exp);
-            }
-            // This method will be removed on v4
-            $builder->set("data", $this->data);
-            // 创建签名
-            $builder->sign($signer, $signer_key);
-            // 生成令牌
-            $token = $builder->getToken();
-            if ($init) {
-                $builder->setExpiration($this->iat + $this->defRefTokenSec);
-                $builder->set("refresh", $this->refreshTokenSecret());
-                $builder->sign($signer, $signer_key);
-                $refreshToken = $builder->getToken();
-            }
-            // 这里可以做一些其它的操作，例如把Token放入到Redis内存里面缓存起来。
-            $this->saveToken((string)$token, (string)$refreshToken);
-            return (string)$token;
-        } catch (\Exception $e) {
-            $this->errorLog = $e->getMessage();
-            return false;
+        $json = json_encode($input);
+        if ($errno = json_last_error()) {
+            static::handleJsonError($errno);
+        } elseif ($json === 'null' && $input !== null) {
+            throw new DomainException('Null result with non-null input');
         }
+        return $json;
     }
 
     /**
-     * 获取Token全部解密数据
+     * Decode a string with URL-safe Base64.
      *
-     * @param string $token
-     * @return array|bool
-     * @author bai
+     * @param string $input A Base64 encoded string
+     *
+     * @return string A decoded string
      */
-    public function getDecodeAllData(string $token = null)
+    public static function urlsafeB64Decode($input)
     {
-        try {
-            $decode = $this->decode($token);
-            if ($decode === false) {
-                return false;
-            }
-            $return = [
-                "iss" => $this->iss,
-                "sub" => $this->sub,
-                "aud" => $this->aud,
-                "jti" => $this->jti,
-                "iat" => $this->iat,
-                "nbf" => $this->nbf,
-                "exp" => $this->exp,
-            ];
-            if ($this->isJson($this->data)) {
-                $this->data = json_decode($this->data, true);
-            }
-            $return['data'] = $this->data;
-            return $return;
-        } catch (\Exception $e) {
-            $this->errorLog = $e->getMessage();
-            return false;
+        $remainder = strlen($input) % 4;
+        if ($remainder) {
+            $padlen = 4 - $remainder;
+            $input .= str_repeat('=', $padlen);
         }
+        return base64_decode(strtr($input, '-_', '+/'));
     }
 
     /**
-     * 获取Token指定的解密数据
+     * Encode a string with URL-safe Base64.
      *
-     * @param string $key
-     * @param string $token
-     * @return bool|mixed
-     * @author bai
+     * @param string $input The string you want encoded
+     *
+     * @return string The base64 encode of what you passed in
      */
-    public function getDecodeData(string $key = 'data', string $token = null)
+    public static function urlsafeB64Encode($input)
     {
-        try {
-            $allowKey = [
-                "iss",
-                "sub",
-                "aud",
-                "jti",
-                "iat",
-                "nbf",
-                "exp",
-                "data",
-            ];
-            if (!in_array($key, $allowKey)) {
-                $this->errorLog = "Key is not allowed";
-                return false;
-            }
-            $decode = $this->decode($token);
-            if ($decode === false) {
-                return false;
-            }
-            $return = isset($decode->getClaims()[$key]) ? $decode->getClaim($key) : "";
-            if ($key == "data") {
-                if ($this->isJson($return)) {
-                    $return = json_decode($return, true);
-                }
-            }
-            return $return;
-        } catch (\Exception $e) {
-            $this->errorLog = $e->getMessage();
-            return false;
-        }
+        return str_replace('=', '', strtr(base64_encode($input), '+/', '-_'));
     }
 
     /**
-     * 获取token集合
+     * Helper method to create a JSON error.
      *
-     * @return array
-     * @author bai
+     * @param int $errno An error number from json_last_error()
+     *
+     * @return void
      */
-    public function getAllToken()
+    private static function handleJsonError($errno)
     {
-        return [
-            "token"        => (string)$this->token,
-            "refreshToken" => (string)$this->rtk
+        $messages = [
+            JSON_ERROR_DEPTH => 'Maximum stack depth exceeded',
+            JSON_ERROR_STATE_MISMATCH => 'Invalid or malformed JSON',
+            JSON_ERROR_CTRL_CHAR => 'Unexpected control character found',
+            JSON_ERROR_SYNTAX => 'Syntax error, malformed JSON',
+            JSON_ERROR_UTF8 => 'Malformed UTF-8 characters' //PHP >= 5.3.3
         ];
+        throw new DomainException(
+            isset($messages[$errno])
+                ? $messages[$errno]
+                : 'Unknown JSON error: ' . $errno
+        );
     }
 
     /**
-     * 验证Token
+     * Get the number of bytes in cryptographic strings.
      *
-     * @param string $token
-     * @return bool
-     * @author bai
+     * @param string $str
+     *
+     * @return int
      */
-    public function validateToken(string $token = null)
+    private static function safeStrlen($str)
     {
-        try {
-            if ($this->isRefreshToken) {
-                if (empty($token) && empty($this->rtk)) {
-                    return false;
-                } elseif (empty($token)) {
-                    $token = (string)$this->rtk;
-                }
-            } else {
-                if (empty($token) && empty($this->token)) {
-                    return false;
-                } elseif (empty($token)) {
-                    $token = (string)$this->token;
-                }
-            }
-            if (empty($this->secret) && empty($this->rsaPublicKey)) {
-                $this->errorLog = "Please set the secret";
-                return false;
-            } elseif (!empty($this->rsaPublicKey)) {
-                $signer_key = $this->rsaPublicKey;
-            } else {
-                $signer_key = $this->secret;
-            }
-            $signer = $this->signer;
-            $parse  = $this->decode($token);
-            if ($parse === false) {
-                return false;
-            }
-            // 验证token签名有效性
-            if (!$parse->verify($signer, $signer_key)) {
-                $this->errorLog = "Invalid Signature";
-                return false;
-            }
-            // 验证token数据有效性
-            $vdata = new ValidationData();
-            $vdata->setIssuer($this->iss);
-            $vdata->setAudience($this->aud);
-            $vdata->setId($this->jti);
-            if (!$parse->validate($vdata)) {
-                $this->errorLog = "Invalid Token";
-                return false;
-            }
-            // 验证token时间是否过期
-            if ($parse->isExpired()) {
-                $this->errorLog = "Token Expired";
-                return false;
-            }
-            return true;
-        } catch (\Exception $e) {
-            $this->errorLog = $e->getMessage();
-            return false;
+        if (function_exists('mb_strlen')) {
+            return mb_strlen($str, '8bit');
         }
+        return strlen($str);
     }
 
     /**
-     * * 根据refreshToken刷新token
+     * Convert an ECDSA signature to an ASN.1 DER sequence
      *
-     * @param string $refreshToken
-     * @param array|bool $data 为true将会清空原jwt中data的数据
-     * @param bool $returnRetoken 是否返回带有新的refreshToken的数据
-     * @return array|bool
-     * @author bai
+     * @param   string $sig The ECDSA signature to convert
+     * @return  string The encoded DER object
      */
-    public function refreshToken(string $refreshToken, $data = [], bool $returnRetoken = false)
+    private static function signatureToDER($sig)
     {
-        // 验证refreshToken有效性
-        $this->isRefreshToken = true;
-        $verify               = $this->validateToken($refreshToken);
-        if ($verify === false) {
-            $this->errorLog = "Invalid RefreshToken, Please re register Token";
-            return false;
+        // Separate the signature into r-value and s-value
+        list($r, $s) = str_split($sig, (int) (strlen($sig) / 2));
+
+        // Trim leading zeros
+        $r = ltrim($r, "\x00");
+        $s = ltrim($s, "\x00");
+
+        // Convert r-value and s-value from unsigned big-endian integers to
+        // signed two's complement
+        if (ord($r[0]) > 0x7f) {
+            $r = "\x00" . $r;
         }
-        // 确认此token是refreshToken
-        if ($this->refresh !== $this->refreshTokenSecret()) {
-            $this->errorLog = "This is not a refreshToken";
-            return false;
+        if (ord($s[0]) > 0x7f) {
+            $s = "\x00" . $s;
         }
-        // 重置数据
-        $this->iat = time();
-        $this->nbf = $this->iat + $this->defAddUseSec;
-        $this->exp = $this->iat + $this->defAddExpSec;
-        if (!empty($data) && $data !== true) {
-            $this->data = $data;
-        } elseif ($data === true) {
-            $this->data = [];
+
+        return self::encodeDER(
+            self::ASN1_SEQUENCE,
+            self::encodeDER(self::ASN1_INTEGER, $r) .
+            self::encodeDER(self::ASN1_INTEGER, $s)
+        );
+    }
+
+    /**
+     * Encodes a value into a DER object.
+     *
+     * @param   int     $type DER tag
+     * @param   string  $value the value to encode
+     * @return  string  the encoded object
+     */
+    private static function encodeDER($type, $value)
+    {
+        $tag_header = 0;
+        if ($type === self::ASN1_SEQUENCE) {
+            $tag_header |= 0x20;
         }
-        if ($returnRetoken) {
-            $this->createToken(true);
-            return $this->getAllToken();
+
+        // Type
+        $der = chr($tag_header | $type);
+
+        // Length
+        $der .= chr(strlen($value));
+
+        return $der . $value;
+    }
+
+    /**
+     * Encodes signature from a DER object.
+     *
+     * @param   string  $der binary signature in DER format
+     * @param   int     $keySize the number of bits in the key
+     * @return  string  the signature
+     */
+    private static function signatureFromDER($der, $keySize)
+    {
+        // OpenSSL returns the ECDSA signatures as a binary ASN.1 DER SEQUENCE
+        list($offset, $_) = self::readDER($der);
+        list($offset, $r) = self::readDER($der, $offset);
+        list($offset, $s) = self::readDER($der, $offset);
+
+        // Convert r-value and s-value from signed two's compliment to unsigned
+        // big-endian integers
+        $r = ltrim($r, "\x00");
+        $s = ltrim($s, "\x00");
+
+        // Pad out r and s so that they are $keySize bits long
+        $r = str_pad($r, $keySize / 8, "\x00", STR_PAD_LEFT);
+        $s = str_pad($s, $keySize / 8, "\x00", STR_PAD_LEFT);
+
+        return $r . $s;
+    }
+
+    /**
+     * Reads binary DER-encoded data and decodes into a single object
+     *
+     * @param string $der the binary data in DER format
+     * @param int $offset the offset of the data stream containing the object
+     * to decode
+     * @return array [$offset, $data] the new offset and the decoded object
+     */
+    private static function readDER($der, $offset = 0)
+    {
+        $pos = $offset;
+        $size = strlen($der);
+        $constructed = (ord($der[$pos]) >> 5) & 0x01;
+        $type = ord($der[$pos++]) & 0x1f;
+
+        // Length
+        $len = ord($der[$pos++]);
+        if ($len & 0x80) {
+            $n = $len & 0x1f;
+            $len = 0;
+            while ($n-- && $pos < $size) {
+                $len = ($len << 8) | ord($der[$pos++]);
+            }
         }
-        return $this->createToken();
+
+        // Value
+        if ($type == self::ASN1_BIT_STRING) {
+            $pos++; // Skip the first contents octet (padding indicator)
+            $data = substr($der, $pos, $len - 1);
+            $pos += $len - 1;
+        } elseif (!$constructed) {
+            $data = substr($der, $pos, $len);
+            $pos += $len;
+        } else {
+            $data = null;
+        }
+
+        return [$pos, $data];
     }
 }
